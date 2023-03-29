@@ -75,7 +75,7 @@ class LQR_Solver:
 
         tt = torch.from_numpy(tt).float()[k_init:]
 
-        dW = (dt)**(0.5)/10000*torch.randn((n_realisations, N_prime, 2, 1))
+        dW = (dt)**(0.5)*torch.randn((n_realisations, N_prime, 2, 1))
 
         X = torch.zeros((n_realisations, N_prime+1, 2, 1))
 
@@ -92,13 +92,10 @@ class LQR_Solver:
         for j in range(X.size()[0]):
             a[j] = self.a(tt, X[j].transpose(1,2)).unsqueeze(-1)
 
-        print( X.transpose(2,3).size())
-        print(torch.from_numpy(self.C).float().size())
-        print(X.size())
         I = X.transpose(2,3) @ torch.from_numpy(self.C).float() @ X
-        I += a.transpose(1,2) @ torch.from_numpy(self.D).float() @ a
+        I += a.transpose(2,3) @ torch.from_numpy(self.D).float() @ a
         I = dt * torch.sum(I, dim=1) + X[:,-1,:,:].transpose(1,2) @ torch.from_numpy(self.R).float() @ X[:,-1,:,:]
 
-        return I
+        return I.squeeze(1).squeeze(1)
 
 

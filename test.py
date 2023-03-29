@@ -53,7 +53,7 @@ A = LQR_Ricatti.a(torch.from_numpy(tt), xx)
 print(V.size())
 print(A.size())
 
-N = 5
+N = 1000
 
 Out_tt, Out_x = LQR_Ricatti.simulate_X(1000, N, 0, torch.zeros((2,1)))
 
@@ -61,7 +61,7 @@ dt = T/N
 
 I_est = LQR_Ricatti.evaluate_J_X(Out_tt, Out_x, dt)
 
-print(I_est.size())
+print(torch.mean(I_est))
 
 '''
 p = Out[0]
