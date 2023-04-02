@@ -5,6 +5,7 @@ import numpy as np
 from lqr_solver import LQR_Solver
 import matplotlib.pyplot as plt
 import torch
+from helper import positive_def_matrix
 
 '''
 T = 5
@@ -21,53 +22,44 @@ print(S[0])
 
 print(S[-1])'''
 
-H = np.zeros((2,2)) #np.eye(2)
-M = np.eye(2)
-sigma = np.eye(2)
-x_init = np.zeros(2)
+# SET UP LQR ----------------------------------------------
+
+H = np.eye(2) #positive_def_matrix()
+M = np.eye(2) #positive_def_matrix() #np.array([[0.15663973 0.15513884],[0.15513884 0.20362521]])
+
+sigma = np.array([[0.05, 0.0],[0.05,0.0]])#0.05*np.eye(2) #positive_def_matrix()
 T = 1
-C = np.zeros((2,2))
-D = np.eye(2)
-R = np.eye(2)
-
-LQR_Ricatti = LQR_Solver(H, M, sigma, x_init, T, C, D, R)
-
-N_T = 100
-tt = np.linspace(0,T,N_T)
-
-S = LQR_Ricatti.solve_ricatti(tt)
-
-I = LQR_Ricatti.evaluate_integral(S,tt)
-
-x1 = np.linspace(0,5,N_T)
-x2 = np.linspace(3,2,N_T)
-xx = torch.zeros((N_T, 1, 2))
-xx[:,:,0] = torch.from_numpy(x1).unsqueeze(1)
-xx[:,:,1] = torch.from_numpy(x2).unsqueeze(1)
+C = 0.1 * np.eye(2) #positive_def_matrix()
+D = 0.1 * np.eye(2) #positive_def_matrix()
+R = np.eye(2) #positive_def_matrix()
 
 
-V = LQR_Ricatti.v(torch.from_numpy(tt), xx)
+LQR_Ricatti = LQR_Solver(H, M, sigma, T, C, D, R)
 
-A = LQR_Ricatti.a(torch.from_numpy(tt), xx)
 
-print(V.size())
-print(A.size())
+N = 10000
+tt = np.linspace(0,T,N+1)
 
-N = 1000
+St = LQR_Ricatti.solve_ricatti(tt).numpy()
 
-Out_tt, Out_x = LQR_Ricatti.simulate_X(1000, N, 0, torch.zeros((2,1)))
+num_realisations = 10000
+x_init = torch.ones((2,1))*3
+
+Out_tt, Out_x = LQR_Ricatti.simulate_X(N, num_realisations, 0, x_init)
 
 dt = T/N
 
-I_est = LQR_Ricatti.evaluate_J_X(Out_tt, Out_x, dt)
+J_est = LQR_Ricatti.evaluate_J_X(Out_tt, Out_x, dt)
 
-print(torch.mean(I_est))
+print("Last state", Out_x[0,-1])
 
-'''
-p = Out[0]
+print("J_est size", J_est.size())
+print(Out_x.size())
 
-p_x = p[:,0].squeeze(1)
-p_y = p[:,1].squeeze(1)
+J_est_mean = torch.mean(J_est)
+V_init = LQR_Ricatti.v(Out_tt, Out_x[0].transpose(-1, -2))[0,0]
+print("V init", V_init)
+print("J est", J_est_mean)
 
-plt.plot(p_x,p_y)
-plt.show()'''
+D = J_est_mean-V_init
+print(D)
