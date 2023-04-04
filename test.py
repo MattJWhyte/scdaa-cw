@@ -27,10 +27,10 @@ print(S[-1])'''
 H = np.eye(2) #positive_def_matrix()
 M = np.eye(2) #positive_def_matrix() #np.array([[0.15663973 0.15513884],[0.15513884 0.20362521]])
 
-sigma = np.array([[0.05, 0.0],[0.05,0.0]])#0.05*np.eye(2) #positive_def_matrix()
+sigma = np.eye(2) #np.array([[0.05, 0.0],[0.05,0.0]])#0.05*np.eye(2) #positive_def_matrix()
 T = 1
-C = 0.1 * np.eye(2) #positive_def_matrix()
-D = 0.1 * np.eye(2) #positive_def_matrix()
+C = np.eye(2) #positive_def_matrix()
+D = np.eye(2) #positive_def_matrix()
 R = np.eye(2) #positive_def_matrix()
 
 
