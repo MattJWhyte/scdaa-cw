@@ -130,7 +130,7 @@ class LQR_Solver:
         # a(t, x) = −DM ⊤ S(t)x
         #S = self.solve_ricatti(tt.numpy())
         #S = torch.from_numpy(S.copy()).float()
-        K = torch.from_numpy(-self.D@self.M.transpose()).float()
+        K = torch.from_numpy(-np.linalg(self.D)@self.M.transpose()).float()
 
         return (K@self.at(self.S, tt)@xx.transpose(-1,-2)).squeeze(-1) #torch.bmm(torch.bmm(K, S), xx.transpose(1,2))
 
@@ -160,7 +160,7 @@ class LQR_Solver:
             D = torch.from_numpy(self.D).float()
             sigma = torch.from_numpy(self.sigma).float()
 
-            X[:, i+1, :, :] = X[:, i, :, :] + dt*(H @ X[:, i, :, :] - M @ D @ M.transpose(0,1) @ self.S[k_init+i] @ X[:,i,:,:])
+            X[:, i+1, :, :] = X[:, i, :, :] + dt*(H @ X[:, i, :, :] - M @ np.linalg(D) @ M.transpose(0,1) @ self.S[k_init+i] @ X[:,i,:,:])
             X[:, i+1, :, :] += sigma @ dW[:,i,:,:]
 
         return tt,X
