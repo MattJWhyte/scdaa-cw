@@ -21,7 +21,7 @@ R = np.eye(2)
 lqr_solver = LQR_Solver(H, M, sigma, T, C, D, R)
 lqr_solver.solve_ricatti(np.linspace(0,T,5001))
 
-batch_size = 25
+batch_size = 100
 x_ini = torch.rand(batch_size, 1, 2) * 2 - 1.0
 t_ini = torch.rand(batch_size)*T
 
