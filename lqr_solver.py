@@ -3,13 +3,11 @@ import torch
 import numpy as np
 from scipy.integrate import odeint
 
+
 class LQR_Solver:
 
     def __init__(self, H, M, sigma, T, C, D, R):
-
         assert T > 0
-        # Maybe assert C,R >= 0 and D > 0
-
         self.H = H
         self.M = M
         self.sigma = sigma
@@ -130,12 +128,11 @@ class LQR_Solver:
         # a(t, x) = −DM ⊤ S(t)x
         #S = self.solve_ricatti(tt.numpy())
         #S = torch.from_numpy(S.copy()).float()
-        K = torch.from_numpy(-self.D@self.M.transpose()).float()
-
+        K = torch.from_numpy(-np.linalg.inv(self.D)@self.M.transpose()).float()
         return (K@self.at(self.S, tt)@xx.transpose(-1,-2)).squeeze(-1) #torch.bmm(torch.bmm(K, S), xx.transpose(1,2))
 
 
-    def simulate_X(self, N, n_realisations, t_init, x_init):
+    def simulate_X(self, N, n_realisations, t_init, x_init, custom_alpha=None):
         dt = self.T/N
 
         assert dt == self.dt
@@ -160,29 +157,78 @@ class LQR_Solver:
             D = torch.from_numpy(self.D).float()
             sigma = torch.from_numpy(self.sigma).float()
 
-            X[:, i+1, :, :] = X[:, i, :, :] + dt*(H @ X[:, i, :, :] - M @ D @ M.transpose(0,1) @ self.S[k_init+i] @ X[:,i,:,:])
+            '''
+            Q = dt*(M @ torch.inverse(D) @ M.transpose(0,1) @ self.S[k_init+i])
+            A = torch.eye(2) + Q
+            B = X[:, i, :, :] + dt*(H @ X[:, i, :, :]) + sigma @ dW[:,i,:,:]
+
+            X[:, i+1, :, :] = torch.linalg.solve(A,B)'''
+
+            if custom_alpha is None:
+                X[:, i+1, :, :] = X[:, i, :, :] + dt*(H @ X[:, i, :, :] - M @ torch.inverse(D) @ M.transpose(0,1) @ self.S[k_init+i] @ X[:,i,:,:])
+            else:
+                X[:, i + 1, :, :] = X[:, i, :, :] + dt*(
+                            H @ X[:, i, :, :] + M @ custom_alpha)
             X[:, i+1, :, :] += sigma @ dW[:,i,:,:]
 
         return tt,X
 
+    # t_init
 
-    def evaluate_J_X(self, tt, X, dt):
+    # k_init : initial step from 0 to N
+    # k_init.size = [batch_size]
 
-        assert self.dt == dt
+    # x_init.size = [batch_size, 2, 1]
 
-        a = self.a(tt, X.transpose(-1,-2)).unsqueeze(-1)
+    # Simulate X from multiple initial conditions
+    def simulate_X_multi_init(self, N, n_realisations):
+
+        k_init = torch.randint(0, 1, (n_realisations,))
+        x_init = torch.rand(n_realisations, 2, 1)*6.0 - 3.0
+
+        mult = int((self.time_grid.shape[0]-1)/N)
+        dt = self.dt*mult
+        t_init = k_init*dt
+
+        tt = torch.linspace(0, self.T, N+1)
+
+        dW = (dt)**(0.5)*torch.randn((n_realisations, N, 2, 1))
+
+        X = torch.zeros((n_realisations, N + 1, 2, 1))
+        X[:, 0, :, :] = x_init
+
+        # batch_size x N + 1
+        mask = (1.0 * (torch.arange(N+1) >= k_init[:, None])).type(torch.int)
+
+        for i in range(N):
+            M = torch.from_numpy(self.M).float()
+            H = torch.from_numpy(self.H).float()
+            D = torch.from_numpy(self.D).float()
+            sigma = torch.from_numpy(self.sigma).float()
+
+            delta = dt*(H @ X[:, i, :, :] - M @ torch.inverse(D) @ M.transpose(0,1) @ self.S[i*mult] @ X[:,i,:,:])
+
+            X[:, i+1, :, :] = X[:, i, :, :] + mask[:,i,None,None] * (delta + sigma @ dW[:,i,:,:])
+
+        return tt,t_init,x_init,X,mask
+
+
+    def evaluate_J_X(self, tt, X, dt, mask=None, custom_alpha=None):
+
+        if custom_alpha is None:
+            a = self.a(tt, X.transpose(-1,-2)).unsqueeze(-1)
+        else:
+            a = custom_alpha
 
         terminal = X[:,-1,:,:].transpose(1,2) @ torch.from_numpy(self.R).float() @ X[:,-1,:,:]
 
         I = X.transpose(-1,-2) @ torch.from_numpy(self.C).float() @ X
         I += a.transpose(-1,-2) @ torch.from_numpy(self.D).float() @ a
 
+        if mask is not None:
+            I *= mask[:,:,None,None]
+
         I = dt * torch.sum(I, dim=1) + terminal
-
-        print(terminal[0,-1])
-        print(I.size())
-        print(terminal.size())
-
         return I.squeeze(1).squeeze(1)
 
 

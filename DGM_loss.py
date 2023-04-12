@@ -38,12 +38,13 @@ class DGM_Loss():
         tr = torch.sum(torch.diagonal(a, dim1=-1,dim2=-2), dim=-1).unsqueeze(-1)
 
         alpha = self.a(x).unsqueeze(-1)
+        #alpha = cuda(torch.ones((5000,2,1)))
 
         x_only = x[:,1:].unsqueeze(-1)
 
-        c1 = (dx.transpose(-1,-2) @ H @ x_only).squeeze(-1)
+        c1 = (dx.transpose(-1,-2) @ H @ x_only).squeeze(-1)   # Possible problem child
         c2 = (dx.transpose(-1,-2) @ M @ alpha).squeeze(-1)
-        c3 = (x_only.transpose(-1,-2) @ C @ x_only).squeeze(-1)
+        c3 = (x_only.transpose(-1,-2) @ C @ x_only).squeeze(-1) # Possible problem child
         c4 = alpha.transpose(-1,-2) @ D @ alpha
 
         f = dt + 0.5*tr + c1 + c2 + c3 + c4

@@ -6,18 +6,40 @@ from helper import positive_def_matrix, torchify_this, cuda
 import matplotlib.pyplot as plt
 import numpy as np
 from DGM import *
+from lqr_solver import LQR_Solver
 
 
-#np.random.seed(0)
+H = np.eye(2)
+M = np.eye(2)
 
-H = positive_def_matrix()
-M = positive_def_matrix() #np.array([[0.15663973 0.15513884],[0.15513884 0.20362521]])
+sigma = 0.05*np.eye(2)
+T = 1.0
+C = 0.1*np.eye(2)
+D = 0.1*np.eye(2)
+R = np.eye(2)
 
-sigma = positive_def_matrix()
-T = 1
-C = positive_def_matrix()
-D = positive_def_matrix()
-R = positive_def_matrix()
+lqr_solver = LQR_Solver(H, M, sigma, T, C, D, R)
+lqr_solver.solve_ricatti(np.linspace(0,T,5001))
+
+batch_size = 25
+x_ini = torch.rand(batch_size, 1, 2) * 2 - 1.0
+t_ini = torch.rand(batch_size)*T
+
+v_ini_mc = torch.zeros(batch_size)
+
+x_ini = x_ini.transpose(-1, -2)
+
+N = 5000
+
+i = 0
+for t,x in zip(t_ini,x_ini[:]):
+    out_t, out_x = lqr_solver.simulate_X(5000, N, t, x)
+    J_est = lqr_solver.evaluate_J_X(out_t, out_x, T / N)
+    J_est_mean = torch.mean(J_est)
+    v_ini_mc[i] = J_est_mean
+    i += 1
+    print("sim {}".format(i))
+
 
 H = torchify_this(H)
 M = torchify_this(M)
@@ -77,6 +99,7 @@ class PDE():
 
         # du/dxdx
         dx1x = torch.autograd.grad(dx1, x, grad_outputs=torch.ones_like(dx1), create_graph=True)[0][:, 1:].unsqueeze(-1)
+
         # du/dydy
         dx2x = torch.autograd.grad(dx2, x, grad_outputs=torch.ones_like(dx2), create_graph=True)[0][:, 1:].unsqueeze(-1)
 
@@ -115,16 +138,15 @@ class PDE():
 
         return torch.mean(diff_error + terminal_error), torch.mean(diff_error), torch.mean(terminal_error)
 
-
 net = Net(3, 100, dim=3)
 net_DGM = cuda(Net_DGM(dim_x=2, dim_S=100))
 
 
-num_epochs = 10000
+num_epochs = 5000
 
-optimizer = torch.optim.Adam(net_DGM.parameters(), lr=0.005)
+optimizer = torch.optim.Adam(net_DGM.parameters(), lr=0.01)
 #scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=(1000,2000,3000,4000,5000,), gamma=0.1)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.5)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.75)
 loss_fn = nn.MSELoss()
 
 batch_size = 10000
@@ -133,18 +155,19 @@ loss_track = []
 diff_e_track = []
 terminal_e_track = []
 
+error_track = []
 
 def net_f(x):
     return net_DGM(x[:,0].unsqueeze(-1), x[:,1:])
 
-pde_loss = PDE(net_f, T, 5.0, 5.0)
+pde_loss = PDE(net_f, T, 1.0, 1.0)
 
-for it in range(num_epochs):
+for it in range(num_epochs+1):
     optimizer.zero_grad()
 
     loss, diff_e, terminal_e = pde_loss.loss_func(batch_size)
 
-    if it >= num_epochs*0.5:
+    if True:
         loss_track.append(loss.cpu().detach().numpy())
         diff_e_track.append(diff_e.cpu().detach().numpy())
         terminal_e_track.append(terminal_e.cpu().detach().numpy())
@@ -154,19 +177,57 @@ for it in range(num_epochs):
 
     if it % 100 == 0:
         plt.clf()
-        plt.plot([j for j in range(len(loss_track))], loss_track, label='loss')
-        plt.plot([j for j in range(len(loss_track))], diff_e_track, label='diff_e')
-        plt.plot([j for j in range(len(loss_track))], terminal_e_track, label='terminal_e')
+        plt.plot([j for j in range(len(loss_track))], np.log(loss_track), label='loss')
+        plt.plot([j for j in range(len(loss_track))], np.log(diff_e_track), label='equation loss')
+        plt.plot([j for j in range(len(loss_track))], np.log(terminal_e_track), label='terminal loss')
         plt.legend()
+        plt.title("Train log-loss for DGM")
+        plt.ylabel("log-loss")
+        plt.xlabel("number of epoch")
         plt.savefig("q3-loss.png")
+
+    if it % 1000 == 0 and it > 0:
+        pred_v = net_DGM(cuda(t_ini.unsqueeze(-1)), cuda(x_ini.squeeze(-1)))
+        print(nn.MSELoss()(cuda(v_ini_mc), pred_v.squeeze(-1)))
+        error_track.append(float(nn.MSELoss()(cuda(v_ini_mc), pred_v.squeeze(-1)).cpu().detach().numpy()))
+        plt.clf()
+        plt.plot([j*1000 for j in range(len(error_track))], error_track)
+        plt.title("MSE of DGM against MC Estimate")
+        plt.ylabel("Mean-Square Error")
+        plt.xlabel("number of epoch")
+        plt.savefig("q3-dgm-mc.png")
 
     loss.backward()
     optimizer.step()
     scheduler.step()
 
+'''
 plt.clf()
 plt.plot([j for j in range(len(loss_track))], loss_track, label='loss')
 plt.plot([j for j in range(len(loss_track))], diff_e_track, label='diff_e')
 plt.plot([j for j in range(len(loss_track))], terminal_e_track, label='terminal_e')
 plt.legend()
-plt.savefig("q3-loss.png")
+plt.savefig("q3-loss.png")'''
+
+
+print("-----------------")
+print("Evaluating models:")
+
+t = torch.rand(1000) * lqr_solver.T
+x = torch.rand(1000, 1, 2) * 1.0 * 2.0 - 1.0
+
+v_true = cuda(lqr_solver.v(t, x))
+
+t = cuda(t.unsqueeze(1))
+x = cuda(x.squeeze(1))
+
+pred_v = net_DGM(t, x)
+v_loss = nn.MSELoss()(v_true, pred_v)
+
+i = torch.argmax((pred_v-v_true)**2)
+
+plt.plot([i for i in range(1000)], ((pred_v-v_true)**2).cpu().numpy())
+plt.savefig("testloss.png")
+
+print(pred_v[i], v_true[i])
+print("v loss: ", v_loss)

@@ -2,7 +2,8 @@
 from DGM import *
 import torch
 import lqr_solver
-from helper import positive_def_matrix
+import matplotlib.pyplot as plt
+
 
 # NB : Ricatti must be solved first
 def get_samples(solver, num_samples):
@@ -10,27 +11,19 @@ def get_samples(solver, num_samples):
     x = torch.rand(num_samples, 1, 2) * 6 - 3.0
     return t, x, solver.v(t, x)
 
-# SET UP LQR ----------------------------------------------
 
-H = np.eye(2) #positive_def_matrix()
-M = np.eye(2) #positive_def_matrix() #np.array([[0.15663973 0.15513884],[0.15513884 0.20362521]])
-
-sigma = np.array([[0.05, 0.0],[0.05,0.0]])#0.05*np.eye(2) #positive_def_matrix()
-T = 1
-C = 0.1 * np.eye(2) #positive_def_matrix()
-D = 0.1 * np.eye(2) #positive_def_matrix()
-R = np.eye(2) #positive_def_matrix()
-
-lqr_s = lqr_solver.LQR_Solver(H, M, sigma, T, C, D, R)
+# SET UP BASE LQR ----------------------------------------------
+from base_solver import *
+# Makes all matrices and lqr_solver available
 
 # SOLVE RICATTI OVER GRID ------------------------------------
 
 N = 10000
 tt = np.linspace(0,T,N+1)
-lqr_s.solve_ricatti(tt)
-lqr_s.test_integrals()
+solver.solve_ricatti(tt)
+solver.test_integrals()
 
-print("Ricatti error", lqr_s.test_Ricatti_ODE())
+print("Ricatti error", solver.test_Ricatti_ODE())
 
 # ML TIME -------------------------------------------------
 
@@ -42,10 +35,12 @@ loss_fn = nn.MSELoss()
 
 batch_size = 2048
 
+running_loss = []
+
 for it in range(100000):
     optimizer.zero_grad()
 
-    train_t, train_x, train_v = get_samples(lqr_s, batch_size)
+    train_t, train_x, train_v = get_samples(solver, batch_size)
 
     train_t = train_t.unsqueeze(1)
     train_x = train_x.squeeze(1)
@@ -58,6 +53,11 @@ for it in range(100000):
         print(torch.max(train_v))
         print("Epoch ", it, " loss ", loss)
 
+    running_loss.append(loss)
+
     loss.backward()
     optimizer.step()
     scheduler.step()
+
+
+plt.plot([i for i in range(len(running_loss))],[np.log(e) for e in running_loss])
