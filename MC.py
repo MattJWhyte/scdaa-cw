@@ -1,13 +1,21 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[247]:
+
+
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
 from scipy.integrate import odeint
 
-
 class LQR_Solver:
 
     def __init__(self, H, M, sigma, T, C, D, R):
+
         assert T > 0
+        # Maybe assert C,R >= 0 and D > 0
+
         self.H = H
         self.M = M
         self.sigma = sigma
@@ -129,10 +137,11 @@ class LQR_Solver:
         #S = self.solve_ricatti(tt.numpy())
         #S = torch.from_numpy(S.copy()).float()
         K = torch.from_numpy(-np.linalg.inv(self.D)@self.M.transpose()).float()
+
         return (K@self.at(self.S, tt)@xx.transpose(-1,-2)).squeeze(-1) #torch.bmm(torch.bmm(K, S), xx.transpose(1,2))
 
 
-    def simulate_X(self, N, n_realisations, t_init, x_init, custom_alpha=None):
+    def simulate_X(self, N, n_realisations, t_init, x_init):
         dt = self.T/N
 
         assert dt == self.dt
@@ -157,77 +166,183 @@ class LQR_Solver:
             D = torch.from_numpy(self.D).float()
             sigma = torch.from_numpy(self.sigma).float()
 
-            '''
-            Q = dt*(M @ torch.inverse(D) @ M.transpose(0,1) @ self.S[k_init+i])
-            A = torch.eye(2) + Q
-            B = X[:, i, :, :] + dt*(H @ X[:, i, :, :]) + sigma @ dW[:,i,:,:]
-
-            X[:, i+1, :, :] = torch.linalg.solve(A,B)'''
-
-            if custom_alpha is None:
-                X[:, i+1, :, :] = X[:, i, :, :] + dt*(H @ X[:, i, :, :] - M @ torch.inverse(D) @ M.transpose(0,1) @ self.S[k_init+i] @ X[:,i,:,:])
-            else:
-                X[:, i + 1, :, :] = X[:, i, :, :] + dt*(
-                            H @ X[:, i, :, :] + M @ custom_alpha)
+            X[:, i+1, :, :] = X[:, i, :, :] + dt*(H @ X[:, i, :, :] - M @ np.linalg.inv(D) @ M.transpose(0,1) @ self.S[k_init+i] @ X[:,i,:,:])
+            X[:, i+1, :, :] += sigma @ dW[:,i,:,:]
 
         return tt,X
 
-    # t_init
 
-    # k_init : initial step from 0 to N
-    # k_init.size = [batch_size]
+    def evaluate_J_X(self, tt, X, dt):
 
-    # x_init.size = [batch_size, 2, 1]
+        assert self.dt == dt
 
-    # Simulate X from multiple initial conditions
-    def simulate_X_multi_init(self, N, n_realisations):
-
-        k_init = torch.randint(0, 1, (n_realisations,))
-        x_init = torch.rand(n_realisations, 2, 1)*6.0 - 3.0
-
-        mult = int((self.time_grid.shape[0]-1)/N)
-        dt = self.dt*mult
-        t_init = k_init*dt
-
-        tt = torch.linspace(0, self.T, N+1)
-
-        dW = (dt)**(0.5)*torch.randn((n_realisations, N, 2, 1))
-
-        X = torch.zeros((n_realisations, N + 1, 2, 1))
-        X[:, 0, :, :] = x_init
-
-        # batch_size x N + 1
-        mask = (1.0 * (torch.arange(N+1) >= k_init[:, None])).type(torch.int)
-
-        for i in range(N):
-            M = torch.from_numpy(self.M).float()
-            H = torch.from_numpy(self.H).float()
-            D = torch.from_numpy(self.D).float()
-            sigma = torch.from_numpy(self.sigma).float()
-
-            delta = dt*(H @ X[:, i, :, :] - M @ torch.inverse(D) @ M.transpose(0,1) @ self.S[i*mult] @ X[:,i,:,:])
-
-            X[:, i+1, :, :] = X[:, i, :, :] + mask[:,i,None,None] * (delta + sigma @ dW[:,i,:,:])
-
-        return tt,t_init,x_init,X,mask
-
-
-    def evaluate_J_X(self, tt, X, dt, mask=None, custom_alpha=None):
-
-        if custom_alpha is None:
-            a = self.a(tt, X.transpose(-1,-2)).unsqueeze(-1)
-        else:
-            a = custom_alpha
+        a = self.a(tt, X.transpose(-1,-2)).unsqueeze(-1)
+        
 
         terminal = X[:,-1,:,:].transpose(1,2) @ torch.from_numpy(self.R).float() @ X[:,-1,:,:]
 
         I = X.transpose(-1,-2) @ torch.from_numpy(self.C).float() @ X
         I += a.transpose(-1,-2) @ torch.from_numpy(self.D).float() @ a
 
-        if mask is not None:
-            I *= mask[:,:,None,None]
-
         I = dt * torch.sum(I, dim=1) + terminal
+
+      
+
         return I.squeeze(1).squeeze(1)
+
+
+# In[313]:
+
+
+from scipy.integrate import odeint
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+from helper import positive_def_matrix
+
+'''
+T = 5
+t = np.linspace(T,0,100)
+
+y0 = np.eye(2).flatten()
+
+def der(y,t):
+    return np.eye(2).flatten()
+
+S = np.reshape(odeint(der, y0, t)[::-1],(100,2,2))
+
+print(S[0])
+
+print(S[-1])'''
+
+torch.manual_seed(5)
+
+# SET UP LQR ----------------------------------------------
+
+H = np.eye(2) #positive_def_matrix()
+M = np.eye(2) #positive_def_matrix() #np.array([[0.15663973 0.15513884],[0.15513884 0.20362521]])
+
+sigma = 0.05*np.eye(2) #np.array([[0.05, 0.0],[0.05,0.0]])#0.05*np.eye(2) #positive_def_matrix()
+T = 1
+C = 0.1*np.eye(2) #positive_def_matrix()
+D = 0.1*np.eye(2) #positive_def_matrix()
+R = np.eye(2) #positive_def_matrix()
+T = 1.0
+
+
+LQR_Ricatti = LQR_Solver(H, M, sigma, T, C, D, R)
+
+
+batch_size = 100
+tt = np.linspace(0,T,batch_size+1)
+
+St = LQR_Ricatti.solve_ricatti(tt).numpy()
+
+x_ini = torch.rand(batch_size, 1, 2) * 6 - 3.0
+x_ini = x_ini.transpose(-1,-2)
+
+num_realisation = 10000
+timesteps = [1, 10, 50, 100, 500, 1000,5000]
+MSE_step = []
+for N in timesteps:
+    tt = np.linspace(0,T,N+1)
+    St = LQR_Ricatti.solve_ricatti(tt).numpy()
+    dt = T/N
+    MSE_t = []
+    i = 0
+    for x in x_ini[:]:
+        out_t, out_x = LQR_Ricatti.simulate_X(N, num_realisation, 0, x)
+        J_est = LQR_Ricatti.evaluate_J_X(out_t, out_x, dt)
+        J_est_mean = torch.mean(J_est)
+        V_init = LQR_Ricatti.v(out_t, out_x[0].transpose(-1, -2))[0,0]
+        MSE_t.append((V_init-J_est_mean).numpy()**2)
+        print(np.shape(out_x))
+        
+    MSE_step.append(np.mean(MSE_t))
+#print(np.mean(MSE))
+
+
+# In[295]:
+
+
+print(batch_size)
+x_ini = torch.rand(batch_size, 1, 2) * 6 - 3.0
+print(np.shape(x_ini))
+
+
+# In[250]:
+
+
+num_realisations = [10,50,100,500,1000,5000,10000,50000]
+timestep = 1000
+MSE_path = []
+tt = np.linspace(0,T,timestep+1)
+St = LQR_Ricatti.solve_ricatti(tt).numpy()
+dt = T/timestep
+for N in num_realisations:
+    MSE_N = []
+    i = 0
+    for x in ini_x[:]:
+        i+=1
+        print(i)
+        out_t, out_x = LQR_Ricatti.simulate_X(timestep, N, 0, x)
+        J_est = LQR_Ricatti.evaluate_J_X(out_t, out_x, dt)
+        J_est_mean = torch.mean(J_est)
+        V_init = LQR_Ricatti.v(out_t, out_x[0].transpose(-1, -2))[0,0]
+        MSE_N.append((V_init-J_est_mean).numpy()**2)
+    MSE_path.append(np.mean(MSE_N))
+
+
+# In[251]:
+
+
+plt.clf()
+plt.figure(figsize=(10, 5))
+ax1 = plt.subplot2grid(shape = (1,2), loc = (0,0))
+ax1.plot(timesteps, MSE_step)
+ax1.set_title('MC error')
+plt.xlabel('number of simulation paths')
+plt.ylabel('Mean-Square Error')
+ax1.set_xscale('log')
+ax1.set_yscale('log')
+ax2 = plt.subplot2grid(shape = (1,2), loc = (0,1))
+ax2.plot(num_realisations, MSE_path)
+ax2.set_title('MC error')
+plt.xlabel('number of timesteps')
+plt.ylabel('Mean-Square Error')
+ax2.set_xscale('log')
+ax2.set_yscale('log')
+plt.savefig('MSEQ1.png')
+ax2.semilogy()
+
+
+# In[316]:
+
+
+
+plt.scatter(np.log(num_realisations), np.log(MSE_path))
+slope, intercept = np.polyfit(np.log(num_realisations), np.log(MSE_path),1)
+print(slope)
+trendline_x = np.array([np.log(num_realisations).min(), np.log(num_realisations).max()])
+trendline_y = slope * trendline_x + intercept
+plt.plot(trendline_x, trendline_y, color='red')
+plt.savefig('scatter_.png')
+
+
+# In[319]:
+
+
+plt.scatter(np.log10(timesteps), np.log10(MSE_step))
+slope, intercept = np.polyfit(np.log10(timesteps), np.log10(MSE_step),1)
+trendline_x = np.array([np.log10(timesteps).min(), np.log10(timesteps).max()])
+print(slope)
+trendline_y = slope * trendline_x + intercept
+plt.plot(trendline_x, trendline_y, color='red')
+#plt.savefig('scatter_1.png')
+
+
+# In[ ]:
+
+
 
 
