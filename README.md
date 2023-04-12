@@ -1,6 +1,7 @@
 # scdaa-cw
 Coursework for Stochastic Control and Dynamic Asset Allocation
 
+By Edward Eriksson, Junyang Wu, Matthew Whyte
 
 ## Organisation
 
